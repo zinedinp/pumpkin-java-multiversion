@@ -156,6 +156,9 @@ impl EventHandler<PacketSentEvent> for PacketSentHandler {
                 return event;
             }
             let is_join = event.packet_id == ids::clientbound::play::LOGIN.current();
+            if is_join {
+                entity_data::join_viewer(viewer(&event.player));
+            }
             // A current id means a different packet to the client, so drop what has none
             match entity_data::for_viewer(viewer(&event.player), || {
                 PacketTranslator::translate_outgoing_packet(

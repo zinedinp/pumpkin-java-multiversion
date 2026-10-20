@@ -80,6 +80,12 @@ pub fn for_viewer<T>(viewer: u128, translate: impl FnOnce() -> T) -> T {
     result
 }
 
+/// Starts tracking the entities of a client that joined.
+pub fn join_viewer(viewer: u128) {
+    let mut types = ENTITY_TYPES.lock().unwrap_or_else(PoisonError::into_inner);
+    types.entry(viewer).or_default();
+}
+
 /// Forgets the entities of a client that left.
 pub fn forget_viewer(viewer: u128) {
     let mut types = ENTITY_TYPES.lock().unwrap_or_else(PoisonError::into_inner);
@@ -87,12 +93,12 @@ pub fn forget_viewer(viewer: u128) {
 }
 
 /// Remembers the type of an entity spawned for an older client.
+/// Only for joined clients, so a packet translated after leave can't bring one back.
 pub fn track_spawn(entity_id: i32, entity_type: u16) {
     let mut types = ENTITY_TYPES.lock().unwrap_or_else(PoisonError::into_inner);
-    types
-        .entry(VIEWER.get())
-        .or_default()
-        .insert(entity_id, entity_type);
+    if let Some(viewed) = types.get_mut(&VIEWER.get()) {
+        viewed.insert(entity_id, entity_type);
+    }
 }
 
 /// REMOVE_ENTITIES: forgets the removed entity types.
@@ -320,6 +326,7 @@ mod tests {
 
     #[test]
     fn ageable_fields_shift_and_age_locked_is_dropped() {
+        join_viewer(0);
         track_spawn(-7, EntityType::COW.id);
         let mut current = Vec::new();
         current.write_var_int(&VarInt(-7)).unwrap();
@@ -343,6 +350,7 @@ mod tests {
 
     #[test]
     fn item_entity_keeps_its_stack_field() {
+        join_viewer(0);
         track_spawn(-8, EntityType::ITEM.id);
         assert_eq!(tracked_data::item::ITEM.id.0, 8);
         let tables = tables_for(V1_21_11).unwrap();
@@ -358,10 +366,14 @@ mod tests {
 
     #[test]
     fn tracking_is_per_viewer_and_forgotten_on_leave() {
+        join_viewer(1);
         for_viewer(1, || track_spawn(-9, EntityType::COW.id));
         assert_eq!(for_viewer(1, || entity_type(-9)), Some(EntityType::COW.id));
         assert_eq!(for_viewer(2, || entity_type(-9)), None);
         forget_viewer(1);
+        assert_eq!(for_viewer(1, || entity_type(-9)), None);
+        // A spawn translated after leave is not tracked again.
+        for_viewer(1, || track_spawn(-9, EntityType::COW.id));
         assert_eq!(for_viewer(1, || entity_type(-9)), None);
     }
 }
